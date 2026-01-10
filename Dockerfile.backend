@@ -1,0 +1,20 @@
+FROM node:20-alpine
+
+# Use Aliyun mirror for faster installation
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
+# Install FFmpeg
+RUN apk add --no-cache ffmpeg
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+
+# Create temp directory
+RUN mkdir -p temp
+
+EXPOSE 3000
+CMD ["npx", "tsx", "api/server.ts"]
