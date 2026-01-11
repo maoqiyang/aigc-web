@@ -1,0 +1,106 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+env:
+  DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+  DEPLOY_PATH: /home/${{ secrets.SERVER_USER }}/video-gen-app
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: true
+          tags: ${{ secrets.DOCKER_HUB_USERNAME }}/video-gen-frontend:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKER_HUB_USERNAME }}/video-gen-frontend:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_HUB_USERNAME }}/video-gen-frontend:buildcache,mode=max
+
+      - name: Build and push Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: ${{ secrets.DOCKER_HUB_USERNAME }}/video-gen-backend:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKER_HUB_USERNAME }}/video-gen-backend:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_HUB_USERNAME }}/video-gen-backend:buildcache,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Copy docker-compose file via scp
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.prod.yml"
+          target: "${{ env.DEPLOY_PATH }}"
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Create directory if it doesn't exist (handled by scp usually, but ensuring)
+            mkdir -p ${{ env.DEPLOY_PATH }}
+            cd ${{ env.DEPLOY_PATH }}
+            
+            # Rename prod compose file to default for convenience or use -f
+            mv docker-compose.prod.yml docker-compose.yml
+            
+            # Create temp directory for video storage if not exists
+            mkdir -p temp
+            
+            # Check if .env exists, if not create a template
+            if [ ! -f .env ]; then
+              echo "Creating .env template..."
+              echo "PORT=3000" > .env
+              echo "ARK_API_KEY=your_key_here" >> .env
+              echo "DOCKER_HUB_USERNAME=${{ secrets.DOCKER_HUB_USERNAME }}" >> .env
+              echo "⚠️ Please edit .env file and set your ARK_API_KEY!"
+            else
+              # Ensure DOCKER_HUB_USERNAME is set in .env for docker-compose to use
+              if ! grep -q "DOCKER_HUB_USERNAME=" .env; then
+                echo "DOCKER_HUB_USERNAME=${{ secrets.DOCKER_HUB_USERNAME }}" >> .env
+              fi
+            fi
+            
+            # Pull latest images
+            # Pass DOCKER_HUB_USERNAME explicitly just in case .env update failed or is partial
+            export DOCKER_HUB_USERNAME=${{ secrets.DOCKER_HUB_USERNAME }}
+            
+            echo "Pulling latest images..."
+            docker-compose pull
+            
+            echo "Restarting services..."
+            docker-compose up -d
+            
+            echo "Cleanup unused images..."
+            docker image prune -f

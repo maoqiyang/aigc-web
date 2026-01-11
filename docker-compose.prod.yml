@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  frontend:
+    image: ${DOCKER_HUB_USERNAME}/video-gen-frontend:latest
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+    restart: always
+
+  backend:
+    image: ${DOCKER_HUB_USERNAME}/video-gen-backend:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - ARK_API_KEY=${ARK_API_KEY}
+    volumes:
+      - ./temp:/app/temp
+    networks:
+      - app-network
+    restart: always
+
+networks:
+  app-network:
+    driver: bridge
