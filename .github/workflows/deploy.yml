@@ -7,7 +7,7 @@ on:
 
 env:
   DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
-  DEPLOY_PATH: /home/${{ secrets.SERVER_USER }}/video-gen-app
+  # Removed hardcoded DEPLOY_PATH to rely on tilde expansion in script
 
 jobs:
   build-and-push:
@@ -59,7 +59,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "docker-compose.prod.yml"
-          target: "${{ env.DEPLOY_PATH }}"
+          target: "video-gen-app"
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -68,9 +68,14 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Create directory if it doesn't exist (handled by scp usually, but ensuring)
-            mkdir -p ${{ env.DEPLOY_PATH }}
-            cd ${{ env.DEPLOY_PATH }}
+            set -e  # Stop on error
+            
+            # Navigate to project directory (relative to home)
+            cd ~/video-gen-app
+            
+            # TEST: Create a 'video' directory for verification as requested
+            mkdir -p video
+            echo "Test directory 'video' created at $(pwd)/video"
             
             # Rename prod compose file to default for convenience or use -f
             mv docker-compose.prod.yml docker-compose.yml
